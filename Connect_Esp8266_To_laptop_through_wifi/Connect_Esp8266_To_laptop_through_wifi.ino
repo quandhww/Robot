@@ -59,7 +59,7 @@
 /*CODE FOR testing if vpn blocks DHCP*/
 #include <ESP8266WiFi.h>
 
-const char* ssid = "laptop_hotspot";     // Replace with your Wi-Fi SSID
+const char* ssid = "RP_Hotspot";     // Replace with your Wi-Fi SSID
 const char* password = "test1234";       // Replace with your Wi-Fi password
 
 IPAddress local_IP(192, 168, 137, 2);   // Manually assigned IP for ESP8266
@@ -68,7 +68,8 @@ IPAddress subnet(255, 255, 255, 0);     // Subnet mask
 IPAddress dns(8, 8, 8, 8);              // Google DNS (or use your laptop's DNS)
 
 WiFiClient client;
-const char* serverIP = "192.168.137.1";  // Replace with your laptop's IP
+const char* serverIP_wlan0 = "192.168.50.1";
+const char* serverIP = serverIP_wlan0;  // Replace with your laptop's IP
 const int serverPort = 1369;            // Port to connect
 int i = 0;
 

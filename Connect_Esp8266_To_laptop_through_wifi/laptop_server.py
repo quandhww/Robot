@@ -6,7 +6,8 @@ netsh advfirewall set allprofiles state on
 import socket
 
 # Server settings
-HOST = "192.168.137.1"  # Listen on all available interfaces
+serverIP_wlan0 = "192.168.50.1"
+HOST = serverIP_wlan0  # Listen on all available interfaces
 PORT = 1369       # Port number
 
 # Create a socket (IPv4, TCP)
