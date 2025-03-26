@@ -2,7 +2,9 @@ import socket
 import time
 
 # Change this to your laptop's IP address
-SERVER_IP = "192.168.137.1"  # Replace with your laptop's actual IP
+# Server settings
+serverIP_wlan0 = "192.168.50.1"
+SERVER_IP = serverIP_wlan0  # Replace with your laptop's actual IP
 SERVER_PORT = 1369            # Must match the server's port
 
 # Create a TCP socket
