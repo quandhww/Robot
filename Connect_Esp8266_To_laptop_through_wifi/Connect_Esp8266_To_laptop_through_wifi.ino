@@ -1,71 +1,147 @@
 #include <ESP8266WiFi.h>
 
+#define MAX_NUMBER_OF_MSG 4
+
 const char* ssid = "RP_Hotspot";     // Replace with your Wi-Fi name
 const char* password = "test1234"; // Replace with your Wi-Fi password
 const char* serverIP = "192.168.50.1";  // Replace with your laptop's IP
 const int serverPort = 1369;            // Port to connect
-int i = 0;
 
-WiFiClient client;
+
+WiFiClient g_client;
 
 void setup() {
     Serial.begin(115200);
     WiFi.begin(ssid, password);
-    int count = 0;
+    int countForTryConnecting = 0;
     // Wait for connection
     while (WiFi.status() != WL_CONNECTED) {
         delay(1000);
-        ++count;
+        ++countForTryConnecting;
         Serial.print("Connecting to WiFi... ");
-        Serial.print(count);
+        Serial.print(countForTryConnecting);
         Serial.println(" time");
     }
     Serial.println("Connected to WiFi!");
     Serial.println(WiFi.localIP());
-    count = 0;
+    countForTryConnecting = 0;
     // Try to connect to server
-    while(client.connect(serverIP, serverPort) == false)
+    while(g_client.connect(serverIP, serverPort) == false)
     {
         Serial.print("Connection failed, error code: ");
-        Serial.println(client.status());  // Prints error code
-        ++count;
+        Serial.println(g_client.status());  // Prints error code
+        ++countForTryConnecting;
         Serial.println("Try again...");  // Prints error code
-        Serial.print(count);
+        Serial.print(countForTryConnecting);
         Serial.println(" time");
         delay(1000);
     }
     Serial.println("Connected to server!");
-    // if (client.connect(serverIP, serverPort)) {
-    //     Serial.println("Connected to server!");
-    // } else {
-    //     Serial.print("Connection failed, error code: ");
-    //     Serial.println(client.status());  // Prints error code
-    // }
 }
-int count = 0;
+
+bool g_isClientReconnectionRequested = false;
+bool g_isWorkDone = false;
+int numberOfMsgSent = 0;
+
+void Reconnect()
+{
+  g_client.stop();
+  int count = 0;
+  while(g_client.connect(serverIP, serverPort) == false)
+  {
+      Serial.print("Re-connection server failed, error code: ");
+      Serial.println(g_client.status());  // Prints error code
+      ++count;
+      Serial.println("Try re-connect server again...");  // Prints error code
+      Serial.print(count);
+      Serial.println(" time");
+      delay(1000);
+  }
+  Serial.println("Re-connected to server!");
+
+}
+
+bool IsMsgSentToServer(String& msg, unsigned long& timeDelayAfterSendingMsg)
+{
+    unsigned long timeout = millis() + 5000;  // 5-second timeout
+    int count_for_waiting_for_ack = 0;
+    while (g_client.available() == 0) {
+      if (millis() > timeout) {
+        Serial.println("No msg received back! Disconnect and Re-try connecting");
+        return false;
+      }
+      ++count_for_waiting_for_ack;
+      Serial.print("Send msg again! ");
+      Serial.print(count_for_waiting_for_ack);
+      Serial.println("time.");
+      g_client.print(msg);
+      delay(timeDelayAfterSendingMsg);
+    }
+    return true;
+}
+
+int g_countForSendingMsgToServer = 0;
+unsigned long g_timeDelayAfterSendingMsgToServer = 100;
 void loop() {
-    if(i == 4) return;
-    // Send data to Laptop (Server)
-    if(i == 3)
+
+
+    if(g_isClientReconnectionRequested == true)
     {
-        client.print("Disconnect from ESP!");
-        delay(1000);
-        client.stop();
+      Reconnect();
+      g_isClientReconnectionRequested = false;
+    }
+    
+    if(g_isWorkDone == false && g_client.connected() == false)
+    {
+      g_isClientReconnectionRequested = true;
+      return;
+    }
+
+    if(numberOfMsgSent == MAX_NUMBER_OF_MSG) return;
+    // Send data to Laptop (Server)
+    if(numberOfMsgSent == MAX_NUMBER_OF_MSG-1)
+    {
+        String msg = "Disconnect from ESP!";
+        g_client.print(msg);
+        delay(100);
+        if(IsMsgSentToServer(msg, g_timeDelayAfterSendingMsgToServer) == false)
+        {
+          g_isClientReconnectionRequested = true;
+          return;
+        }
+        if (g_client.available()) {
+            Serial.print("Laptop: ");
+            while (g_client.available()) {  // Ensure we read all data
+                char c = g_client.read();
+                Serial.print(c);
+            }
+            Serial.println();
+        }
+        g_client.stop();
+        g_isWorkDone = true;
         Serial.println("DONE STOP");
-        ++i;
+        ++numberOfMsgSent;
         return;
     }
-    ++i;
+
     Serial.println("START");
-    ++count;
-    String msg = String("Hello from ESP8266! ") + String(count) + " time.";
-    client.print(msg);
-    delay(500);  // Wait for response
-    // Read response from Laptop
-    if (client.available()) {
+
+    ++g_countForSendingMsgToServer;
+    String msg = String("Hello from ESP8266! ") + String(g_countForSendingMsgToServer) + " time.";
+    g_client.print(msg);
+    g_client.flush();
+    delay(g_timeDelayAfterSendingMsgToServer);  // Wait for response
+    
+    //read response from server
+    if(IsMsgSentToServer(msg, g_timeDelayAfterSendingMsgToServer) == false){
+      g_isClientReconnectionRequested = true;
+      return;
+    } 
+
+    if (g_client.available()) {
         Serial.print("Laptop: ");
-        while (client.available()) {  // Ensure we read all data
-            char c = client.read();
+        while (g_client.available()) {  // Ensure we read all data
+            char c = g_client.read();
             Serial.print(c);
         }
         Serial.println();
@@ -75,7 +151,7 @@ void loop() {
         Serial.println("No response received");
     }
     
-
+    ++numberOfMsgSent;
     delay(3000); // Wait before sending again
 }
 
