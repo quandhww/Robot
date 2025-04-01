@@ -1,3 +1,8 @@
+/*
+To do:
+Write all the program again by hand
+*/
+
 #include <iostream>
 #include <cstring>
 #include <unistd.h>
