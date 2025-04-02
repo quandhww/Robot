@@ -1,6 +1,6 @@
 /*
 To do:
-Write all the program again by hand
+Use thread to handler connection
 */
 
 #include <iostream>
@@ -30,6 +30,10 @@ int main()
         std::cerr << "Can not create serverSocket!";
         exit(EXIT_FAILURE);
     }
+
+    struct linger linger_opt = {1, 0};  // Linger active, timeout 0
+    /*port will close immediately when program exits*/
+    setsockopt(serverSocket, SOL_SOCKET, SO_LINGER, &linger_opt, sizeof(linger_opt));
 
     if(bind(serverSocket, 
         reinterpret_cast<struct sockaddr*>(&socketServerAddress), 
