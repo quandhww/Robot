@@ -13,10 +13,10 @@ Write all the program again by hand
 
 int main()
 {
-    std::string serverEthernetIpAddress = "192.168.99.200";
+    std::string staticServerEthernetIpAddress = "192.168.99.200";
     struct sockaddr_in socketServerAddress;
     socketServerAddress.sin_family = AF_INET;
-    if(inet_pton(AF_INET, serverEthernetIpAddress.c_str(), &socketServerAddress.sin_addr) <= 0)
+    if(inet_pton(AF_INET, staticServerEthernetIpAddress.c_str(), &socketServerAddress.sin_addr) <= 0)
     {
         std::cerr << "Can not set ip address to socketServerAddress!";
         exit(EXIT_FAILURE);
