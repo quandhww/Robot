@@ -9,10 +9,10 @@ const char* password = "test1234"; // Replace with your Wi-Fi password
 const char* serverIP = "192.168.50.1";  // Replace with your laptop's IP
 const int serverPort = 1369;            // Port to connect
 
-
 WiFiClient g_client;
 
 void setup() {
+    pinMode(LED_BUILTIN, OUTPUT);
     Serial.begin(115200);
     WiFi.begin(ssid, password);
     int countForTryConnecting = 0;
@@ -102,10 +102,13 @@ bool ParseJsonCommand(String jsonStr)
 
   // Handle command
   if (strcmp(command, "ON") == 0 ) {
-    // turn LED on
+    digitalWrite(LED_BUILTIN, HIGH);  // LED ON (active LOW)
+    Serial.println("LED turned ON");
   } else if (strcmp(command, "OFF") == 0) {
-    // turn LED off
+    digitalWrite(LED_BUILTIN, LOW); // LED OFF
+    Serial.println("LED turned OFF");
   }
+  return true;
 }
 
 bool ReadFromServer() {
@@ -141,17 +144,19 @@ void SendAckJsonToServer() {
 }
 
 bool g_IsHandShakeDone = false;
-unsigned long g_timeDelayAfterSendingMsgToServer = 100; /*ms*/
+unsigned long g_timeDelayAfterSendingMsgToServer = 500; /*ms*/
 void loop() {
     if(g_isClientReconnectionRequested == true)
     {
       Reconnect();
       g_isClientReconnectionRequested = false;
+      g_IsHandShakeDone = false;
     }
     
     if(g_client.connected() == false)
     {
       g_isClientReconnectionRequested = true;
+      g_IsHandShakeDone = false;
       return;
     }
 
@@ -194,11 +199,13 @@ void loop() {
     }
     else
     {
+      Serial.println("HANDSHAKE IS DONE!, waiting for command...");
       if (g_client.available()) {
           Serial.print("Server says: ");
           if(ReadFromServer() == false)
           {
             g_isClientReconnectionRequested = true;
+            g_IsHandShakeDone = false;
           }
           else
           {
@@ -207,10 +214,9 @@ void loop() {
 
       } else {
           // If you want to keep the ESP idle unless data comes in, you can delay a little
-          delay(100);
+          delay(500);
       }
     }
-
 }
 
 
