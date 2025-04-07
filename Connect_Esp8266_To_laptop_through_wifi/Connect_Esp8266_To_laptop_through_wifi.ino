@@ -1,6 +1,8 @@
 #include <ESP8266WiFi.h>
+#include <ArduinoJson.h>
 
 #define MAX_NUMBER_OF_MSG 4
+#define IDENTIFY String("ESP//")
 
 const char* ssid = "RP_Hotspot";     // Replace with your Wi-Fi name
 const char* password = "test1234"; // Replace with your Wi-Fi password
@@ -80,79 +82,135 @@ bool IsMsgSentToServer(String& msg, unsigned long& timeDelayAfterSendingMsg)
     return true;
 }
 
-int g_countForSendingMsgToServer = 0;
-unsigned long g_timeDelayAfterSendingMsgToServer = 100;
+
+/*msg = {"cmd": "..."}*/
+bool ParseJsonCommand(String jsonStr) 
+{
+  StaticJsonDocument<200> doc;
+  DeserializationError error = deserializeJson(doc, jsonStr);
+  
+  if (error) {
+    Serial.print("JSON parsing failed: ");
+    Serial.println(error.c_str());
+    return false;
+  }
+
+  const char* command = doc["cmd"];
+
+  Serial.print("Command: ");
+  Serial.println(command);
+
+  // Handle command
+  if (strcmp(command, "ON") == 0 ) {
+    // turn LED on
+  } else if (strcmp(command, "OFF") == 0) {
+    // turn LED off
+  }
+}
+
+bool ReadFromServer() {
+  String inputBuffer = "";
+  while (g_client.available()) {
+    char c = g_client.read();
+    if (c == '\n') {
+      if(ParseJsonCommand(inputBuffer) == false)
+      {
+        return false;
+      }
+    } else {
+      inputBuffer += c;
+    }
+  }
+  return true;
+}
+
+void SendAckJsonToServer() {
+  StaticJsonDocument<200> doc;
+
+  doc["cmd"] = "ACK";
+
+  String output;
+  serializeJson(doc, output);
+  output += "\n";  // Add newline so server can know message ends
+
+  g_client.print(output);
+  g_client.flush();
+
+  Serial.print("Sent to server: ");
+  Serial.println(output);
+}
+
+bool g_IsHandShakeDone = false;
+unsigned long g_timeDelayAfterSendingMsgToServer = 100; /*ms*/
 void loop() {
-
-
     if(g_isClientReconnectionRequested == true)
     {
       Reconnect();
       g_isClientReconnectionRequested = false;
     }
     
-    if(g_isWorkDone == false && g_client.connected() == false)
+    if(g_client.connected() == false)
     {
       g_isClientReconnectionRequested = true;
       return;
     }
 
-    if(numberOfMsgSent == MAX_NUMBER_OF_MSG) return;
-    // Send data to Laptop (Server)
-    if(numberOfMsgSent == MAX_NUMBER_OF_MSG-1)
+    if(g_IsHandShakeDone == false)
     {
-        String msg = "Disconnect from ESP!";
-        g_client.print(msg);
-        delay(100);
-        if(IsMsgSentToServer(msg, g_timeDelayAfterSendingMsgToServer) == false)
-        {
+      Serial.println("START");
+      
+      String msg = IDENTIFY + String("Hello from ESP8266! ");
+      g_client.print(msg);
+      g_client.flush();
+      delay(g_timeDelayAfterSendingMsgToServer);  // Wait for response
+      
+      //read response from server
+      if(IsMsgSentToServer(msg, g_timeDelayAfterSendingMsgToServer) == false){
+        g_isClientReconnectionRequested = true;
+        return;
+      } 
+
+      if (g_client.available()) {
+          String returnMsg = "";
+          Serial.print("RASP: ");
+          while (g_client.available()) {  // Ensure we read all data
+              char c = g_client.read();
+              returnMsg += String(c);
+          }
+          if(returnMsg == "ACK")
+          {
+            g_IsHandShakeDone = true;
+          }
+          Serial.print(returnMsg);
+          Serial.println();
+          return;
+      }
+      else
+      {
+          Serial.println("No response received");
           g_isClientReconnectionRequested = true;
           return;
-        }
-        if (g_client.available()) {
-            Serial.print("Laptop: ");
-            while (g_client.available()) {  // Ensure we read all data
-                char c = g_client.read();
-                Serial.print(c);
-            }
-            Serial.println();
-        }
-        g_client.stop();
-        g_isWorkDone = true;
-        Serial.println("DONE STOP");
-        ++numberOfMsgSent;
-        return;
-    }
-
-    Serial.println("START");
-
-    ++g_countForSendingMsgToServer;
-    String msg = String("Hello from ESP8266! ") + String(g_countForSendingMsgToServer) + " time.";
-    g_client.print(msg);
-    g_client.flush();
-    delay(g_timeDelayAfterSendingMsgToServer);  // Wait for response
-    
-    //read response from server
-    if(IsMsgSentToServer(msg, g_timeDelayAfterSendingMsgToServer) == false){
-      g_isClientReconnectionRequested = true;
-      return;
-    } 
-
-    if (g_client.available()) {
-        Serial.print("Laptop: ");
-        while (g_client.available()) {  // Ensure we read all data
-            char c = g_client.read();
-            Serial.print(c);
-        }
-        Serial.println();
+      }
     }
     else
     {
-        Serial.println("No response received");
+      if (g_client.available()) {
+          Serial.print("Server says: ");
+          if(ReadFromServer() == false)
+          {
+            g_isClientReconnectionRequested = true;
+          }
+          else
+          {
+            SendAckJsonToServer();
+          }
+
+      } else {
+          // If you want to keep the ESP idle unless data comes in, you can delay a little
+          delay(100);
+      }
     }
-    
-    ++numberOfMsgSent;
-    delay(3000); // Wait before sending again
+
 }
 
 
