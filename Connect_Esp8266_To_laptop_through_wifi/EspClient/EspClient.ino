@@ -2,7 +2,7 @@
 #include <ArduinoJson.h>
 
 #define MAX_NUMBER_OF_MSG 4
-#define IDENTIFY String("ESP//")
+#define IDENTIFY String("ESP")
 
 const char* ssid = "RP_Hotspot";     // Replace with your Wi-Fi name
 const char* password = "test1234"; // Replace with your Wi-Fi password
@@ -127,10 +127,11 @@ bool ReadFromServer() {
   return true;
 }
 
-void SendAckJsonToServer() {
+String SendMsgJsonToServer(String msg, String from, String to) {
   StaticJsonDocument<200> doc;
-
-  doc["cmd"] = "ACK";
+  doc["from"] = from;
+  doc["to"] = to;
+  doc["cmd"] = msg;
 
   String output;
   serializeJson(doc, output);
@@ -141,6 +142,7 @@ void SendAckJsonToServer() {
 
   Serial.print("Sent to server: ");
   Serial.println(output);
+  return output;
 }
 
 bool g_IsHandShakeDone = false;
@@ -163,10 +165,7 @@ void loop() {
     if(g_IsHandShakeDone == false)
     {
       Serial.println("START");
-      
-      String msg = IDENTIFY + String("Hello from ESP8266! ");
-      g_client.print(msg);
-      g_client.flush();
+      String msg = SendMsgJsonToServer("HANDSHAKE", IDENTIFY, "SERVER");
       delay(g_timeDelayAfterSendingMsgToServer);  // Wait for response
       
       //read response from server
@@ -209,7 +208,8 @@ void loop() {
           }
           else
           {
-            SendAckJsonToServer();
+            SendMsgJsonToServer("ACK", IDENTIFY, "SERVER");
+            delay(g_timeDelayAfterSendingMsgToServer);  // Wait for response
           }
 
       } else {
