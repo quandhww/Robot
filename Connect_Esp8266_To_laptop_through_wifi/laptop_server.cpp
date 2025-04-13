@@ -1,7 +1,7 @@
 /*
 TODO:
 Create a client from laptop and send command from there
-Connection is not stable
+Connection is not stable: Create a heartbeat mechanism
 */
 
 
@@ -16,6 +16,7 @@ Connection is not stable
 #include <condition_variable>
 #include <poll.h>
 #include <chrono>
+#include <unordered_map>
 #include "include/json.hpp"
 using json = nlohmann::json;
 
@@ -33,22 +34,46 @@ std::queue<int> g_clientHandlerQueue{};
 std::mutex g_m_g_clientHandlerQueue{};
 std::condition_variable g_cv_g_clientHandlerQueue{};
 
-std::string GetMsgFromJson(char* buffer)
+bool IsJsonMsgParsed(char* buffer, std::unordered_map<std::string, std::string>& jsonMsg)
 {
     // Parse the JSON message
     try {
         json receivedJson = json::parse(buffer);
-
+        if (receivedJson.contains("from"))
+        {
+            std::string from = receivedJson["from"];
+            std::cout << "from: " << from << "\n";
+            jsonMsg["from"] = from;
+        }
+        else
+        {
+            throw("Missing [from]");
+        }
+        if (receivedJson.contains("to")) {
+            std::string to = receivedJson["to"];
+            std::cout << "to: " << to << "\n";
+            jsonMsg["to"] = to;
+        }
+        else
+        {
+            throw("Missing [to]");
+        }
         // Process the parsed JSON
         if (receivedJson.contains("cmd")) {
             std::string command = receivedJson["cmd"];
             std::cout << "Received command: " << command << "\n";
-            return command;
+            jsonMsg["cmd"] = command;
         }
+        else
+        {
+            throw("Missing [cmd]");
+        }
+
     } catch (const std::exception& e) {
         std::cout << "Error parsing JSON: " << e.what() << "\n";
+        return false;
     }
-    return "";
+    return true;
 }
 
 bool IsMsgSentToController(int& clientHandler)
@@ -67,7 +92,7 @@ bool IsMsgSentToController(int& clientHandler)
     if (activity < 0) {
         std::cout << "Error in select function\n";
     } else if (activity == 0) {
-        std::cout << "Timeout reached, no data received from client within " << TIMEOUT_SECONDS << " seconds\n";
+        std::cout << CURRENT_TIME << ": " << "Timeout reached, no data received from client within " << TIMEOUT_SECONDS << " seconds\n";
     } else {
         if (FD_ISSET(clientHandler, &readfds)) {
             // Read data (non-blocking)
@@ -81,9 +106,10 @@ bool IsMsgSentToController(int& clientHandler)
                 if (buffer[readStatus - 1] == '\n') {
                     buffer[readStatus - 1] = '\0';
                     std::cout << "Received JSON message: " << buffer << "\n";
-                    if(GetMsgFromJson(buffer) == "ACK")
+                    std::unordered_map<std::string, std::string> jsonMsg{};
+                    if(IsJsonMsgParsed(buffer, jsonMsg) == true)
                     {
-                        return true;
+                        if(jsonMsg["cmd"] == "ACK") return true;
                     }
                 } else {
                     std::cout << "Message does not end with newline or is incomplete.\n";
@@ -94,35 +120,30 @@ bool IsMsgSentToController(int& clientHandler)
     return false;
 }
 
-std::string CreateMsgJsonToSend(std::string msg)
+std::string CreateMsgJsonToSend(std::string msg, std::string from, std::string to)
 {
     // Create JSON message
     json j;
     j["cmd"] = msg;
+    j["from"] = from;
+    j["to"] = to;
     // Serialize the JSON to string
     std::string json_message = j.dump();
     json_message += '\n';
     return json_message;
 }
 
-bool CheckController(char* buffer)
+bool IsConnectionFromController(char* buffer)
 {
-    std::string temp = "";
-    for(int i=0; i<10; ++i)
-    {
-        if(buffer[i] == '/')
-        {
-            if(temp == "ESP") return true;
-            else return false;
-        }
-        temp += buffer[i];
-    }
+    std::unordered_map<std::string, std::string> jsonMsg{};
+    if(IsJsonMsgParsed(buffer, jsonMsg) == false) return false;
+    if(jsonMsg["from"] == "ESP" && jsonMsg["cmd"] == "HANDSHAKE") return true;
     return false;
 }
 
-bool HandleController(int& clientHandler, std::thread::id thread_id)
+bool IsControllerHandledSuccessfully(int& clientHandler, std::thread::id thread_id)
 {
-    std::cout << "In HandleController\n";
+    std::cout << "IsControllerHandledSuccessfully\n";
     struct sockaddr_in clientAddress;
     socklen_t clientAddress_len = sizeof(clientAddress);
     getpeername(clientHandler, reinterpret_cast<struct sockaddr*>(&clientAddress), &clientAddress_len);
@@ -130,7 +151,7 @@ bool HandleController(int& clientHandler, std::thread::id thread_id)
     if (inet_ntop(AF_INET, &clientAddress.sin_addr, clientIpAdress, INET_ADDRSTRLEN) == NULL) 
     {
         std::cout << CURRENT_TIME << ": " << "Can not convert ip address of client\n";
-        return true;
+        return false;
     }
     std::cout << CURRENT_TIME << ": " << "Thread - {" << thread_id << "} controlling client - " << std::string(clientIpAdress)<< "/" << clientAddress.sin_port << '\n';
 
@@ -148,7 +169,7 @@ bool HandleController(int& clientHandler, std::thread::id thread_id)
         {
             in = "ON";
         }
-        std::string msg = CreateMsgJsonToSend(in);
+        std::string msg = CreateMsgJsonToSend(in, "SERVER", "ESP");
         int blockingMode = 0;
         if(send(clientHandler, msg.c_str(), msg.size(), blockingMode) == -1)
         {
@@ -159,10 +180,10 @@ bool HandleController(int& clientHandler, std::thread::id thread_id)
         else
         {
             std::cout << CURRENT_TIME << ": " << "No ACK from CONTROLLER" << '\n';
-            return true;
+            return false;
         }
     }
-    return false;
+    return true;
 }
 
 void HandleClient(int& clientHandler, std::thread::id thread_id)
@@ -181,17 +202,17 @@ void HandleClient(int& clientHandler, std::thread::id thread_id)
     char buffer[BUFFER_SIZE] = {0};
     std::cout << CURRENT_TIME << ": " << "Thread - {" << thread_id << "}" << " waiting for msg...\n";
 
-    bool flag = false;
+    bool isConnectionClosed = false;
     int readStatus = read(clientHandler, buffer, BUFFER_SIZE);
     if(readStatus == -1)
     {
         std::cout << CURRENT_TIME << ": " << "Can not read client!" << '\n';
-        flag = true;
+        isConnectionClosed = true;
     }
     else if(readStatus == 0)
     {
         std::cout << CURRENT_TIME << ": " << "Client close connection!!!\n";
-        flag = true;
+        isConnectionClosed = true;
     }
     else
     {
@@ -201,15 +222,17 @@ void HandleClient(int& clientHandler, std::thread::id thread_id)
         if(send(clientHandler, msg.c_str(), msg.size(), blockingMode) == -1)
         {
             std::cout << CURRENT_TIME << ": " << "Can not send msg back to client!";
-            flag = true;
+            isConnectionClosed = true;
         }
         std::cout << CURRENT_TIME << ": " << "Thread - {" << thread_id << "}" << " sent ACK\n";
-        if(CheckController(buffer) == true)
+        if(IsConnectionFromController(buffer) == true)
         {
-            flag = HandleController(clientHandler, thread_id);
+            isConnectionClosed = ( 
+                (IsControllerHandledSuccessfully(clientHandler, thread_id) == true) ? false:true
+            );
         }
     }
-    if(flag == true)
+    if(isConnectionClosed == true)
     {
         close(clientHandler);
         std::cout << CURRENT_TIME << ": " << "Thread - {" << thread_id << "}" << " CLOSE connection from client " << std::string(clientIpAdress)<< "/" << clientAddress.sin_port << '\n';
@@ -229,6 +252,7 @@ void ThreadForHandlingClient()
     std::cout << CURRENT_TIME << ": " << "Start thread: " << std::this_thread::get_id() << '\n';
     while(true)
     {
+        std::cout << CURRENT_TIME << ": " << "Thread: " << std::this_thread::get_id() << " waiting for connection of queue ..." << '\n';
         std::unique_lock<std::mutex> ul_clientHandlerQueue{g_m_g_clientHandlerQueue};
         g_cv_g_clientHandlerQueue.wait(ul_clientHandlerQueue, []()->bool{return g_clientHandlerQueue.size() != 0;});
         int newClientHandler = g_clientHandlerQueue.front();
